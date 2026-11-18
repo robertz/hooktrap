@@ -7,6 +7,61 @@ method, is stored exactly as it arrived and shows up live in the browser with
 its headers, query and body. Any captured request can be sent again, byte for
 byte, to another server.
 
+## Why you'd use it
+
+Webhooks are awkward to develop against. The sender decides when they fire,
+you can't see what was sent unless your handler logs it, and when your
+handler has a bug you have to trigger the real event again to retry.
+Hooktrap sits in between:
+
+- **See exactly what a provider sends.** Point Stripe, GitHub, Shopify or
+  anything else at a bin before you write a line of handler code, and read
+  the real headers, signature and payload instead of the docs' example.
+- **Develop against a recorded request.** Capture an event once, then replay
+  it at your local handler as many times as it takes to get it right. No
+  need to make another test payment or push another commit to fire it again.
+- **Debug signature checks.** Bodies are stored and replayed as the exact
+  bytes received, so an HMAC over the body still verifies on replay.
+  Re-serialized JSON wouldn't. (A provider that also signs a timestamp, as
+  Stripe does, will reject an old replay unless your handler's tolerance
+  allows it.)
+- **Check what your own code sends.** Use a bin as the target for an
+  outbound webhook, an HTTP client or a form post, and inspect the request
+  your app actually made.
+- **Keep payloads on your machine.** Hosted request bins see everything you
+  send them. This one runs locally.
+
+## How to use it
+
+1. Start the app and open it, then click **Create a bin**. The page shows the
+   bin's capture URL.
+2. Send requests to that URL. Any method and any path below it works, so
+   `/in/<bin>/stripe/events` and `/in/<bin>/github` can share a bin:
+
+   ```bash
+   curl -X POST 'http://localhost:3000/in/<bin>/stripe/events?type=invoice.paid' \
+     -H 'Content-Type: application/json' \
+     -d '{"id":"evt_1","type":"invoice.paid"}'
+   ```
+
+3. Requests appear in the list as they arrive. Select one to see its query,
+   headers and body. JSON is pretty-printed; a body that isn't text is shown
+   as base64.
+4. To replay, enter your local server's address (`http://localhost:8080`)
+   and press **Replay**. The path and query the request arrived with are
+   appended to the target, so a request captured at
+   `/in/<bin>/stripe/events?type=invoice.paid` goes to
+   `http://localhost:8080/stripe/events?type=invoice.paid`. The response's
+   status, headers, body and timing are kept next to the request.
+
+### Receiving webhooks from the internet
+
+A provider can't reach `localhost`, so put a tunnel in front of the app
+(ngrok, Cloudflare Tunnel, Tailscale Funnel) and give the provider the
+tunnel's address plus `/in/<bin>`. Set `HOOKTRAP_PUBLIC_URL` to the tunnel's
+address so the page shows the right capture URL. Every request is answered
+with a `200`, so the provider treats the delivery as successful.
+
 ## Run
 
 ```bash

@@ -22,6 +22,12 @@ class {
 		app.set( "log", "access" )
 		app.set( "maxBodySize", settings.limits.maxBodyBytes )
 		app.health()
+		var store = arguments.svc.store
+		// app.health() only answers /health/live and /health/ready
+		app.get( "/health", ( req, res ) => {
+			res.set( "Cache-Control", "no-store" )
+			res.json( { status: "ok", bins: store.count() } )
+		} )
 
 		// before any body parser, so a captured body is never parsed
 		CaptureRoutes::register( app, arguments.svc )
