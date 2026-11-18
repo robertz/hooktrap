@@ -1,0 +1,7 @@
+<bx:output>
+<main class="home">
+	<h1>#encodeForHTML( data.status )#</h1>
+	<p class="lead">#encodeForHTML( data.message )#</p>
+	<p><a href="/">Back to the front page</a></p>
+</main>
+</bx:output>

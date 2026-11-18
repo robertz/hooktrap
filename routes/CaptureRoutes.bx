@@ -1,0 +1,48 @@
+import services.ApiError;
+import services.Payload;
+
+/**
+ * /in/:bin and anything under it, on any method: whatever arrives is stored
+ * as it was sent and answered with a 200.
+ */
+class {
+
+	static void function register( required app, required struct svc ) {
+		var store = arguments.svc.store
+
+		var requireBin = ( req, res, next ) => {
+			if ( !store.exists( req.params.bin ) ) {
+				ApiError::notFound( "No such bin" )
+			}
+			next()
+		}
+		// every content type, so nothing is parsed and the bytes stay exactly as sent
+		var rawBody = boxExpressRaw( { type: ( req ) => true, limit: arguments.svc.settings.limits.maxBodyBytes } )
+
+		var capture = ( req, res ) => {
+			var bytes   = isBinary( req.body ) ? req.body : Payload::emptyBytes()
+			var address = req.originalUrl
+			var mark    = find( "?", address )
+			var headers = []
+			for ( var name in req.headers.keyArray().sort( "textnocase" ) ) {
+				var value = req.headers[ name ]
+				headers.append( { name: name, value: isArray( value ) ? value.toList( ", " ) : toString( value ) } )
+			}
+			var entry = store.add( req.params.bin, {
+				method      : req.method,
+				path        : len( req.params.rest ?: "" ) ? "/" & req.params.rest : "",
+				query       : mark && mark < len( address ) ? mid( address, mark + 1, len( address ) - mark ) : "",
+				headers     : headers,
+				contentType : req.get( "Content-Type" ) ?: "",
+				ip          : req.ip,
+				size        : arrayLen( bytes ),
+				bodyBytes   : bytes
+			} )
+			res.json( { ok: true, id: entry.id } )
+		}
+
+		arguments.app.all( "/in/:bin", requireBin, rawBody, capture )
+		arguments.app.all( "/in/:bin/*rest", requireBin, rawBody, capture )
+	}
+
+}

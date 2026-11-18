@@ -1,0 +1,203 @@
+import services.ApiError;
+import services.Payload;
+
+/**
+ * Bins and the requests they caught, in memory. Handlers run on many threads
+ * at once, so the bin map is a ConcurrentHashMap and each bin's request list
+ * is only touched under that bin's lock.
+ */
+class {
+
+	function init( required struct limits ) {
+		variables.limits = arguments.limits
+		variables.bins   = new java:java.util.concurrent.ConcurrentHashMap()
+		variables.random = new java:java.security.SecureRandom()
+		return this
+	}
+
+	string function create() {
+		if ( variables.bins.size() >= variables.limits.maxBins ) {
+			ApiError::tooMany( "This server already holds #variables.limits.maxBins# bins. Delete one first." )
+		}
+		var id = token( 20 )
+		variables.bins.put( id, {
+			id          : id,
+			createdAt   : timestamp(),
+			lastSeenAt  : getTickCount(),
+			requests    : [],
+			subscribers : new java:java.util.concurrent.ConcurrentHashMap()
+		} )
+		return id
+	}
+
+	boolean function exists( required string id ) {
+		return variables.bins.containsKey( arguments.id )
+	}
+
+	struct function describe( required string id ) {
+		var bin = requireBin( arguments.id )
+		return { id: bin.id, createdAt: bin.createdAt }
+	}
+
+	struct function add( required string id, required struct captured ) {
+		var bin   = requireBin( arguments.id )
+		var entry = arguments.captured
+		entry.id         = token( 10 )
+		entry.receivedAt = timestamp()
+		entry.replays    = []
+		lock name="hooktrap-bin-#bin.id#" type="exclusive" timeout=5 {
+			bin.requests.prepend( entry )
+			while ( bin.requests.len() > variables.limits.maxRequests ) {
+				bin.requests.deleteAt( bin.requests.len() )
+			}
+			bin.lastSeenAt = getTickCount()
+		}
+		broadcast( bin, summarize( entry ), "request" )
+		return entry
+	}
+
+	array function list( required string id ) {
+		var bin = requireBin( arguments.id )
+		lock name="hooktrap-bin-#bin.id#" type="exclusive" timeout=5 {
+			return bin.requests.map( ( entry ) => summarize( entry ) )
+		}
+	}
+
+	/** The stored entry itself, bytes included. */
+	struct function entryFor( required string id, required string requestId ) {
+		var bin = requireBin( arguments.id )
+		lock name="hooktrap-bin-#bin.id#" type="exclusive" timeout=5 {
+			for ( var entry in bin.requests ) {
+				if ( compare( entry.id, arguments.requestId ) == 0 ) {
+					return entry
+				}
+			}
+		}
+		ApiError::notFound( "That request is no longer in this bin" )
+	}
+
+	struct function detail( required string id, required string requestId ) {
+		var entry  = entryFor( arguments.id, arguments.requestId )
+		var result = summarize( entry )
+		result.headers = entry.headers
+		result.body    = Payload::describe( entry.bodyBytes )
+		result.replays = entry.replays
+		return result
+	}
+
+	void function addReplay( required string id, required string requestId, required struct replay ) {
+		var bin   = requireBin( arguments.id )
+		var entry = entryFor( arguments.id, arguments.requestId )
+		lock name="hooktrap-bin-#bin.id#" type="exclusive" timeout=5 {
+			entry.replays.prepend( arguments.replay )
+		}
+		broadcast( bin, { requestId: entry.id, replayCount: entry.replays.len() }, "replay" )
+	}
+
+	void function clear( required string id ) {
+		var bin = requireBin( arguments.id )
+		lock name="hooktrap-bin-#bin.id#" type="exclusive" timeout=5 {
+			bin.requests.clear()
+		}
+		broadcast( bin, {}, "cleared" )
+	}
+
+	void function remove( required string id ) {
+		var bin = requireBin( arguments.id )
+		variables.bins.remove( bin.id )
+		broadcast( bin, {}, "deleted" )
+		for ( var key in bin.subscribers.keySet().toArray() ) {
+			var emitter = bin.subscribers.remove( key )
+			if ( !isNull( emitter ) ) {
+				emitter.close()
+			}
+		}
+	}
+
+	string function subscribe( required string id, required emitter ) {
+		var bin = requireBin( arguments.id )
+		var key = token( 12 )
+		bin.subscribers.put( key, arguments.emitter )
+		bin.lastSeenAt = getTickCount()
+		return key
+	}
+
+	void function unsubscribe( required string id, required string key ) {
+		var bin = variables.bins.get( arguments.id )
+		if ( !isNull( bin ) ) {
+			bin.subscribers.remove( arguments.key )
+		}
+	}
+
+	/** Removes bins nobody has sent to or watched within the idle window. */
+	numeric function prune() {
+		var cutoff  = getTickCount() - variables.limits.idleHours * 3600000
+		var removed = 0
+		for ( var id in variables.bins.keySet().toArray() ) {
+			var bin = variables.bins.get( id )
+			if ( !isNull( bin ) && bin.subscribers.isEmpty() && bin.lastSeenAt < cutoff ) {
+				variables.bins.remove( id )
+				removed++
+			}
+		}
+		return removed
+	}
+
+	numeric function count() {
+		return variables.bins.size()
+	}
+
+	function requireBin( required string id ) {
+		var bin = variables.bins.get( arguments.id )
+		if ( isNull( bin ) ) {
+			ApiError::notFound( "No such bin" )
+		}
+		return bin
+	}
+
+	struct function summarize( required struct entry ) {
+		return {
+			id          : arguments.entry.id,
+			receivedAt  : arguments.entry.receivedAt,
+			method      : arguments.entry.method,
+			path        : arguments.entry.path,
+			query       : arguments.entry.query,
+			contentType : arguments.entry.contentType,
+			size        : arguments.entry.size,
+			ip          : arguments.entry.ip,
+			replayCount : arguments.entry.replays.len()
+		}
+	}
+
+	void function broadcast( required struct bin, required struct data, required string event ) {
+		for ( var key in arguments.bin.subscribers.keySet().toArray() ) {
+			var emitter = arguments.bin.subscribers.get( key )
+			if ( isNull( emitter ) ) {
+				continue
+			}
+			try {
+				emitter.send( arguments.data, arguments.event )
+			} catch ( any e ) {
+				arguments.bin.subscribers.remove( key )
+				continue
+			}
+			if ( emitter.isClosed() ) {
+				arguments.bin.subscribers.remove( key )
+			}
+		}
+	}
+
+	string function token( required numeric length ) {
+		var alphabet = "abcdefghjkmnpqrstuvwxyz23456789"
+		var result   = ""
+		for ( var i = 1; i <= arguments.length; i++ ) {
+			result &= mid( alphabet, variables.random.nextInt( len( alphabet ) ) + 1, 1 )
+		}
+		return result
+	}
+
+	string function timestamp() {
+		return createObject( "java", "java.time.Instant" ).now().toString()
+	}
+
+}

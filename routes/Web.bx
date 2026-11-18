@@ -1,0 +1,65 @@
+import services.ApiError;
+import routes.CaptureRoutes;
+import routes.BinRoutes;
+import routes.PageRoutes;
+
+/**
+ * Builds the BoxExpress app.
+ *
+ *   /in/:bin...   capture: any method, any body, stored raw
+ *   /api/...      JSON for the inspector page, plus its live event stream
+ *   /, /b/:id     the pages
+ */
+class {
+
+	static function build( required struct svc ) {
+		var settings = arguments.svc.settings
+		var app      = boxExpress()
+
+		app.set( "views", settings.root & "/views" )
+		app.set( "view layout", "layouts/main" )
+		app.set( "env", settings.development ? "development" : "production" )
+		app.set( "log", "access" )
+		app.set( "maxBodySize", settings.limits.maxBodyBytes )
+		app.health()
+
+		// before any body parser, so a captured body is never parsed
+		CaptureRoutes::register( app, arguments.svc )
+
+		app.use( boxExpressHelmet( { contentSecurityPolicy: "default-src 'self'" } ) )
+		app.use( "/public", boxExpressStatic( settings.root & "/public" ) )
+
+		var api = boxExpressRouter()
+		api.use( boxExpressJSON() )
+		BinRoutes::register( api, arguments.svc )
+		app.use( "/api", api )
+
+		PageRoutes::register( app, arguments.svc )
+
+		app.all( "/*", ( req, res ) => ApiError::notFound( "Nothing here" ) )
+		app.use( errorHandler( settings.development ) )
+		return app
+	}
+
+	/** JSON for the API and capture endpoints, a page for everything else. */
+	private static function errorHandler( required boolean development ) {
+		var showInternals = arguments.development
+		return ( err, req, res, next ) => {
+			var type    = err.type ?: ""
+			var status  = ApiError::statusFor( type )
+			var message = err.message ?: "Error"
+			if ( status == 500 ) {
+				println( "[hooktrap] #req.method# #req.originalUrl# failed: #type# #message#" )
+				if ( !showInternals ) {
+					message = "Internal Server Error"
+				}
+			}
+			if ( reFindNoCase( "^/(api|in)/", req.originalUrl ) ) {
+				res.status( status ).json( { error: true, code: ApiError::codeFor( status ), message: message } )
+			} else {
+				res.status( status ).render( "error", { title: "#status# · Hooktrap", status: status, message: message } )
+			}
+		}
+	}
+
+}

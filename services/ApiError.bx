@@ -1,0 +1,46 @@
+/**
+ * Errors a route can throw to produce a specific HTTP response. The error
+ * middleware maps the type to a status.
+ */
+class {
+
+	static {
+		STATUS = {
+			"Api.BadRequest" : 400,
+			"Api.Forbidden"  : 403,
+			"Api.NotFound"   : 404,
+			"Api.TooMany"    : 429
+		}
+	}
+
+	static function badRequest( required string message ) {
+		throw( type = "Api.BadRequest", message = arguments.message )
+	}
+
+	static function forbidden( required string message ) {
+		throw( type = "Api.Forbidden", message = arguments.message )
+	}
+
+	static function notFound( string message = "Not found" ) {
+		throw( type = "Api.NotFound", message = arguments.message )
+	}
+
+	static function tooMany( required string message ) {
+		throw( type = "Api.TooMany", message = arguments.message )
+	}
+
+	static numeric function statusFor( required string type ) {
+		return static.STATUS[ arguments.type ] ?: 500
+	}
+
+	static string function codeFor( required numeric status ) {
+		switch ( arguments.status ) {
+			case 400: return "bad_request"
+			case 403: return "forbidden"
+			case 404: return "not_found"
+			case 429: return "rate_limited"
+			default : return "server_error"
+		}
+	}
+
+}

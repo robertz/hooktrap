@@ -1,0 +1,67 @@
+import services.ApiError;
+
+/** The JSON API the inspector page talks to, mounted at /api. */
+class {
+
+	static void function register( required router, required struct svc ) {
+		var store    = arguments.svc.store
+		var replayer = arguments.svc.replayer
+		var api      = arguments.router
+
+		api.get( "/bins/:id", ( req, res ) => {
+			res.json( store.describe( req.params.id ) )
+		} )
+
+		api.delete( "/bins/:id", ( req, res ) => {
+			store.remove( req.params.id )
+			res.sendStatus( 204 )
+		} )
+
+		api.get( "/bins/:id/requests", ( req, res ) => {
+			res.json( { requests: store.list( req.params.id ) } )
+		} )
+
+		api.delete( "/bins/:id/requests", ( req, res ) => {
+			store.clear( req.params.id )
+			res.sendStatus( 204 )
+		} )
+
+		api.get( "/bins/:id/requests/:requestId", ( req, res ) => {
+			res.json( store.detail( req.params.id, req.params.requestId ) )
+		} )
+
+		api.post( "/bins/:id/requests/:requestId/replay", ( req, res ) => {
+			var target = isStruct( req.body ) ? ( req.body.target ?: "" ) : ""
+			if ( !isSimpleValue( target ) || !len( trim( target ) ) ) {
+				ApiError::badRequest( "Give a target URL to replay to" )
+			}
+			var entry  = store.entryFor( req.params.id, req.params.requestId )
+			var replay = replayer.send( entry, target )
+			store.addReplay( req.params.id, req.params.requestId, replay )
+			res.json( replay )
+		} )
+
+		api.get( "/bins/:id/stream", ( req, res ) => {
+			var binId = req.params.id
+			store.requireBin( binId )
+			res.sse( ( emitter ) => {
+				var key = store.subscribe( binId, emitter )
+				try {
+					emitter.send( { ok: true }, "ready" )
+					var waited = 0
+					while ( !emitter.isClosed() && store.exists( binId ) ) {
+						sleep( 1000 )
+						waited++
+						// isClosed() only turns true on a failed write, so this is also how a gone client is noticed
+						if ( waited % 15 == 0 ) {
+							emitter.comment( "ping" )
+						}
+					}
+				} finally {
+					store.unsubscribe( binId, key )
+				}
+			} )
+		} )
+	}
+
+}

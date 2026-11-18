@@ -1,0 +1,48 @@
+/**
+ * Loads settings and wires the services together, so server.bxs and any
+ * script or test build the same object graph.
+ */
+class {
+
+	static {
+		ROOT = expandPath( getDirectoryFromPath( getCurrentTemplatePath() ) & ".." )
+	}
+
+	/** Settings come from environment variables (.env locally). See .env.example. */
+	static struct function loadSettings( struct overrides = {} ) {
+		var environment = lcase( setting( "ENV", "development" ) )
+		var settings    = {
+			root        : static.ROOT,
+			port        : int( setting( "PORT", 3000 ) ),
+			environment : environment,
+			development : environment == "development",
+			publicUrl   : reReplace( setting( "HOOKTRAP_PUBLIC_URL", "" ), "/+$", "" ),
+			limits      : {
+				maxBodyBytes : int( setting( "HOOKTRAP_MAX_BODY_BYTES", 1048576 ) ),
+				maxBins      : int( setting( "HOOKTRAP_MAX_BINS", 200 ) ),
+				maxRequests  : int( setting( "HOOKTRAP_MAX_REQUESTS", 100 ) ),
+				idleHours    : int( setting( "HOOKTRAP_IDLE_HOURS", 24 ) )
+			},
+			replay : {
+				hosts          : listToArray( setting( "HOOKTRAP_REPLAY_HOSTS", "localhost,127.0.0.1,::1" ) ),
+				timeoutSeconds : int( setting( "HOOKTRAP_REPLAY_TIMEOUT_SECONDS", 15 ) )
+			}
+		}
+		settings.append( arguments.overrides, true )
+		return settings
+	}
+
+	static struct function build( required struct settings ) {
+		return {
+			settings : arguments.settings,
+			store    : new BinStore( arguments.settings.limits ),
+			replayer : new Replayer( arguments.settings.replay.hosts, arguments.settings.replay.timeoutSeconds )
+		}
+	}
+
+	private static string function setting( required string name, defaultValue = "" ) {
+		var value = trim( getSystemSetting( arguments.name, "" ) )
+		return len( value ) ? value : arguments.defaultValue
+	}
+
+}

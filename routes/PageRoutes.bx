@@ -1,0 +1,22 @@
+/** The two HTML pages: the front page and a bin's inspector. */
+class {
+
+	static void function register( required app, required struct svc ) {
+		var store     = arguments.svc.store
+		var publicUrl = arguments.svc.settings.publicUrl
+
+		arguments.app.get( "/", ( req, res ) => {
+			res.render( "home", { title: "Hooktrap" } )
+		} )
+
+		arguments.app.post( "/bins", ( req, res ) => {
+			res.redirect( "/b/" & store.create(), 303 )
+		} )
+
+		arguments.app.get( "/b/:id", ( req, res ) => {
+			var bin = store.describe( req.params.id )
+			res.render( "bin", { title: "Bin #bin.id# · Hooktrap", bin: bin, publicUrl: publicUrl } )
+		} )
+	}
+
+}

@@ -1,0 +1,17 @@
+<bx:output><!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>#encodeForHTML( data.title ?: "Hooktrap" )#</title>
+	<link rel="stylesheet" href="/public/app.css">
+</head>
+<body>
+	<header class="top">
+		<a class="brand" href="/">hooktrap</a>
+		<span class="tagline">catch, inspect and replay webhooks</span>
+	</header>
+	#data.body#
+</body>
+</html>
+</bx:output>

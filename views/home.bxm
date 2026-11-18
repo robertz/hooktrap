@@ -1,0 +1,12 @@
+<main class="home">
+	<h1>Point a webhook here and watch it land.</h1>
+	<p class="lead">A bin is a throwaway URL. Anything sent to it, on any method, shows up live with its headers and exact body. Replay any request against your local server as often as you like.</p>
+	<form method="post" action="/bins">
+		<button class="primary" type="submit">Create a bin</button>
+	</form>
+	<section id="recent" hidden>
+		<h2>Bins opened in this browser</h2>
+		<ul id="recent-list"></ul>
+	</section>
+</main>
+<script src="/public/home.js" defer></script>

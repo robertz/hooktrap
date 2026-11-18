@@ -1,0 +1,20 @@
+/**
+ * boxlang server.bxs   (run from this directory, or use ./start.sh)
+ */
+import services.Bootstrap;
+import routes.Web;
+
+settings = Bootstrap::loadSettings()
+svc      = Bootstrap::build( settings )
+app      = Web::build( svc )
+
+app.set( "reloadOnChange", settings.development )
+
+app.schedule( 60 * 60 * 1000, () => {
+	var removed = svc.store.prune()
+	if ( removed ) {
+		println( "[hooktrap] removed #removed# idle bins" )
+	}
+}, { name: "bin-prune", immediate: false } )
+
+app.listen( settings.port, ( port ) => println( "hooktrap listening on http://localhost:#port#" ) )

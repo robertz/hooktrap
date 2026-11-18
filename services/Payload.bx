@@ -1,0 +1,30 @@
+/**
+ * Turns captured bytes into something JSON can carry: the text when the
+ * bytes are valid UTF-8, base64 otherwise.
+ */
+class {
+
+	static struct function describe( required any bytes, numeric maxBytes = 0 ) {
+		var size      = arrayLen( arguments.bytes )
+		var shown     = arguments.bytes
+		var truncated = arguments.maxBytes > 0 && size > arguments.maxBytes
+		if ( truncated ) {
+			shown = createObject( "java", "java.util.Arrays" ).copyOf( arguments.bytes, javaCast( "int", arguments.maxBytes ) )
+		}
+		if ( size == 0 ) {
+			return { encoding: "utf8", text: "", size: 0, truncated: false }
+		}
+		try {
+			var decoder = createObject( "java", "java.nio.charset.StandardCharsets" ).UTF_8.newDecoder()
+			var text    = decoder.decode( createObject( "java", "java.nio.ByteBuffer" ).wrap( shown ) ).toString()
+			return { encoding: "utf8", text: text, size: size, truncated: truncated }
+		} catch ( any e ) {
+			return { encoding: "base64", text: binaryEncode( shown, "base64" ), size: size, truncated: truncated }
+		}
+	}
+
+	static function emptyBytes() {
+		return "".getBytes()
+	}
+
+}

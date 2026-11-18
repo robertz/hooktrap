@@ -1,0 +1,108 @@
+import services.ApiError;
+import services.Payload;
+
+/**
+ * Sends a captured request again, byte for byte, to a target the user names.
+ * Targets are limited to an allowlist of hosts (loopback by default) so the
+ * server can't be used to reach arbitrary addresses on its network.
+ */
+class {
+
+	static {
+		// set by the HTTP client itself, or meaningless on a new connection
+		SKIPPED_HEADERS = [
+			"host", "content-length", "connection", "expect", "upgrade", "transfer-encoding",
+			"keep-alive", "accept-encoding", "te", "trailer", "proxy-connection", "http2-settings"
+		]
+		MAX_RESPONSE_BYTES = 262144
+	}
+
+	function init( required array allowedHosts, numeric timeoutSeconds = 15 ) {
+		variables.allowedHosts   = arguments.allowedHosts.map( ( host ) => lcase( trim( host ) ) )
+		variables.timeoutSeconds = arguments.timeoutSeconds
+		variables.duration       = createObject( "java", "java.time.Duration" )
+		variables.client         = createObject( "java", "java.net.http.HttpClient" )
+			.newBuilder()
+			.connectTimeout( variables.duration.ofSeconds( 5 ) )
+			.build()
+		return this
+	}
+
+	struct function send( required struct entry, required string target ) {
+		var destination = destinationFor( arguments.target, arguments.entry )
+		var result      = {
+			at          : createObject( "java", "java.time.Instant" ).now().toString(),
+			destination : destination,
+			status      : 0,
+			durationMs  : 0,
+			headers     : [],
+			body        : Payload::describe( Payload::emptyBytes() ),
+			error       : ""
+		}
+		var started = getTickCount()
+		try {
+			var publishers = createObject( "java", "java.net.http.HttpRequest$BodyPublishers" )
+			var publisher  = arguments.entry.size > 0 ? publishers.ofByteArray( arguments.entry.bodyBytes ) : publishers.noBody()
+			var builder    = createObject( "java", "java.net.http.HttpRequest" )
+				.newBuilder( createObject( "java", "java.net.URI" ).create( destination ) )
+				.timeout( variables.duration.ofSeconds( javaCast( "long", variables.timeoutSeconds ) ) )
+				.method( arguments.entry.method, publisher )
+			for ( var header in arguments.entry.headers ) {
+				if ( static.SKIPPED_HEADERS.find( lcase( header.name ) ) ) {
+					continue
+				}
+				try {
+					builder.header( header.name, header.value )
+				} catch ( any e ) {
+					// a name or value the client refuses to send; the rest still go
+				}
+			}
+			var response = variables.client.send(
+				builder.build(),
+				createObject( "java", "java.net.http.HttpResponse$BodyHandlers" ).ofByteArray()
+			)
+			result.status = response.statusCode()
+			result.body   = Payload::describe( response.body(), static.MAX_RESPONSE_BYTES )
+			var received  = response.headers().map()
+			for ( var name in received.keySet().toArray() ) {
+				result.headers.append( { name: name, value: arrayToList( received.get( name ).toArray(), ", " ) } )
+			}
+		} catch ( any e ) {
+			// the Java exception's own message is often null, so name the common failures from the trace
+			var trace = ( e.message ?: "" ) & " " & ( e.stackTrace ?: "" )
+			if ( findNoCase( "TimeoutException", trace ) ) {
+				result.error = "No response within #variables.timeoutSeconds# seconds"
+			} else if ( findNoCase( "ConnectException", trace ) || findNoCase( "ClosedChannelException", trace ) ) {
+				result.error = "Couldn't connect. Is anything listening there?"
+			} else {
+				result.error = len( e.message ?: "" ) ? e.message : "The request failed"
+			}
+		}
+		result.durationMs = getTickCount() - started
+		return result
+	}
+
+	string function destinationFor( required string target, required struct entry ) {
+		var given = trim( arguments.target )
+		if ( !reFindNoCase( "^https?://", given ) ) {
+			given = "http://" & given
+		}
+		try {
+			var parsed = createObject( "java", "java.net.URI" ).create( given )
+			var host   = lcase( parsed.getHost() ?: "" )
+		} catch ( any e ) {
+			ApiError::badRequest( "That target isn't a URL" )
+		}
+		if ( !len( host ) ) {
+			ApiError::badRequest( "That target isn't a URL" )
+		}
+		host = host.replace( "[", "" ).replace( "]", "" )
+		if ( !variables.allowedHosts.find( "*" ) && !variables.allowedHosts.find( host ) ) {
+			ApiError::forbidden( "Replay is limited to #variables.allowedHosts.toList( ', ' )#. Add #host# to HOOKTRAP_REPLAY_HOSTS to allow it." )
+		}
+		var base = reReplace( given, "[?##].*$", "" )
+		base     = reReplace( base, "/+$", "" )
+		return base & arguments.entry.path & ( len( arguments.entry.query ) ? "?" & arguments.entry.query : "" )
+	}
+
+}

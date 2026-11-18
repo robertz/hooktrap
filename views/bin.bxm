@@ -1,0 +1,21 @@
+<bx:output>
+<main class="bin" id="bin" data-bin="#encodeForHTMLAttribute( data.bin.id )#" data-public-url="#encodeForHTMLAttribute( data.publicUrl )#">
+	<section class="endpoint">
+		<div class="endpoint-url">
+			<span class="label">Send requests to</span>
+			<code id="endpoint"></code>
+			<button id="copy" type="button">Copy</button>
+		</div>
+		<div class="endpoint-actions">
+			<span id="status" class="status">connecting</span>
+			<button id="clear" type="button">Clear</button>
+			<button id="delete" type="button" class="danger">Delete bin</button>
+		</div>
+	</section>
+	<div class="panes">
+		<aside id="list" class="list" aria-label="Captured requests"></aside>
+		<article id="detail" class="detail"></article>
+	</div>
+</main>
+<script src="/public/bin.js" defer></script>
+</bx:output>
